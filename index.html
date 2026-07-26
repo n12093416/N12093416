@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+    <title>3D 타워 점프 멀티플레이어</title>
+    <style>
+        * { box-sizing: border-box; touch-action: none; user-select: none; }
+        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
+        canvas { display: block; position: absolute; top: 0; left: 0; z-index: 1; }
+        
+        /* 왼쪽 정보 패널 */
+        #ui { position: absolute; top: 10px; left: 10px; color: white; background: rgba(0,0,0,0.65); padding: 10px; border-radius: 10px; z-index: 10; font-size: 12px; pointer-events: none; }
+        #room-status { color: #f59e0b; font-weight: bold; margin-top: 4px; }
+        #room-controls { margin-top: 8px; display: flex; gap: 6px; pointer-events: auto; }
+        .room-btn { background: #0284c7; color: white; border: none; padding: 6px 8px; border-radius: 6px; font-weight: bold; font-size: 11px; cursor: pointer; }
+        .room-btn:active { background: #0369a1; }
+
+        /* 👑 상단 타워 스테이지 사이드바 */
+        #top-sidebar {
+            position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+            background: rgba(0,0,0,0.8); border: 2px solid #10b981; border-radius: 20px;
+            display: flex; align-items: center; padding: 5px 15px; color: white; z-index: 20;
+        }
+        .stage-btn { background: #374151; color: white; border: none; width: 30px; height: 30px; border-radius: 50%; font-weight: bold; font-size: 16px; cursor: pointer; pointer-events: auto; }
+        .stage-btn:active { background: #4b5563; }
+        #stage-info { margin: 0 15px; font-weight: bold; font-size: 14px; text-align: center; }
+
+        /* 🎥 카메라 모드 & 쉬프트락 */
+        #right-controls { position: absolute; top: 10px; right: 10px; display: flex; flex-direction: column; gap: 10px; z-index: 20; pointer-events: auto; }
+        .side-btn { padding: 10px; background: rgba(255,255,255,0.2); border: 2px solid rgba(255,255,255,0.4); border-radius: 8px; color: white; font-weight: bold; font-size: 12px; cursor: pointer; }
+        .side-btn.active { background: #0284c7; border-color: #38bdf8; }
+
+        #crosshair { display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: rgba(255,255,255,0.8); font-size: 24px; font-weight: bold; z-index: 30; }
+
+        /* 🕹️ 모바일 조작계 */
+        #joystick-zone { position: absolute; bottom: 30px; left: 30px; width: 120px; height: 120px; background: rgba(255,255,255,0.15); border: 2px solid rgba(255,255,255,0.3); border-radius: 50%; display: flex; justify-content: center; align-items: center; z-index: 20; pointer-events: auto; }
+        #joystick-knob { width: 50px; height: 50px; background: rgba(56, 189, 248, 0.8); border-radius: 50%; position: absolute; box-shadow: 0 0 10px rgba(0,0,0,0.5); pointer-events: none; }
+        #jump-btn { position: absolute; bottom: 35px; right: 35px; width: 70px; height: 70px; background: rgba(255,255,255,0.25); border: 2px solid rgba(255,255,255,0.5); border-radius: 50%; color: white; font-weight: bold; font-size: 16px; display: flex; justify-content: center; align-items: center; z-index: 20; pointer-events: auto; }
+        #jump-btn:active { background: rgba(56, 189, 248, 0.8); transform: scale(0.95); }
+        #touch-camera-zone { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 5; }
+    </style>
+</head>
+<body>
+
+<div id="crosshair">+</div>
+<div id="ui">
+    <div style="font-weight: bold; margin-bottom: 4px;">🎮 3D 타워 점프</div>
+    <div style="font-size: 12px; margin-bottom: 2px;">내 ID: <span id="my-id" style="color: #38bdf8; font-weight: bold;">생성중...</span></div>
+    <div>접속자: <span id="player-count">1</span>명</div>
+    <div id="room-status">상태: 연결 대기 중</div>
+    <div id="room-controls">
+        <button class="room-btn" onclick="createRoom()">🏠 방 생성</button>
+        <button class="room-btn" onclick="joinRoom()">🔗 방 참가</button>
+    </div>
+</div>
+
+<div id="top-sidebar">
+    <button class="stage-btn" onclick="teleportStage(-1)">◁</button>
+    <div id="stage-info">Floor 1<br><span style="font-size:10px; color:#10b981;">Max: 1</span></div>
+    <button class="stage-btn" onclick="teleportStage(1)">▷</button>
+</div>
+
+<div id="right-controls">
+    <button id="cam-toggle-btn" class="side-btn">🎥 3인칭</button>
+    <button id="shiftlock-btn" class="side-btn">🔒 Lock OFF</button>
+</div>
+
+<div id="touch-camera-zone"></div>
+<div id="joystick-zone"><div id="joystick-knob"></div></div>
+<div id="jump-btn">점프</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+
+<script>
+    // --- 시스템 변수 ---
+    const floorHeight = 20;
+    let peer = null;
+    let myData = { id: "", x: 0, y: 2, z: 40, rotY: 0, maxF: 0 };
+    let velocityY = 0, gravity = -0.015, jumpStrength = 0.35, isGrounded = false;
+    let cameraDistance = 6, rotX = 0.2; 
+    let isShiftLock = false, isFirstPerson = false;
+    let currentViewFloor = 0, highestFloor = 0, globalMaxFloor = 0;
+
+    const connections = {};
+    const otherPlayers = {};
+    const platforms = {}; 
+
+    // --- Three.js 초기화 ---
+    const scene = new THREE.Scene();
+    scene.
