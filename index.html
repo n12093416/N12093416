@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>웹 3D 방 멀티플레이어</title>
+    <style>
+        * { box-sizing: border-box; touch-action: none; user-select: none; }
+        body { margin: 0; overflow: hidden; background: #0f172a; font-family: sans-serif; }
+        
+        #ui { position: absolute; top: 15px; left: 15px; color: white; background: rgba(0,0,0,0.65); padding: 12px 16px; border-radius: 12px; z-index: 10; font-size: 13px; }
+        #my-id { color: #38bdf8; font-weight: bold; }
+        #room-status { color: #f59e0b; font-weight: bold; margin-top: 4px; }
+
+        /* 방 생성/참가 컨트롤 */
+        #room-controls { margin-top: 8px; display: flex; gap: 6px; pointer-events: auto; }
+        .room-btn { background: #0284c7; color: white; border: none; padding: 6px 10px; border-radius: 6px; font-weight: bold; font-size: 11px; cursor: pointer; }
+        .room-btn:active { background: #0369a1; }
+
+        #crosshair {
+            display: none; position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%); color: rgba(255, 255, 255, 0.8);
+            font-size: 24px; font-weight: bold; pointer-events: none; z-index: 30;
+        }
+
+        #shiftlock-btn {
+            position: absolute; top: 15px; right: 15px;
+            padding: 10px 16px; background: rgba(255,255,255,0.2);
+            border: 2px solid rgba(255,255,255,0.4); border-radius: 8px;
+            color: white; font-weight: bold; font-size: 13px; z-index: 20;
+        }
+        #shiftlock-btn.active { background: #0284c7; border-color: #38bdf8; }
+
+        #joystick-zone {
+            position: absolute; bottom: 30px; left: 30px;
+            width: 120px; height: 120px; background: rgba(255,255,255,0.15);
+            border: 2px solid rgba(255,255,255,0.3); border-radius: 50%;
+            display: flex; justify-content: center; align-items: center; z-index: 20;
+        }
+        #joystick-knob {
+            width: 50px; height: 50px; background: rgba(56, 189, 248, 0.8);
+            border-radius: 50%; position: absolute; box-shadow: 0 0 10px rgba(0,0,0,0.5);
+            pointer-events: none;
+        }
+
+        #jump-btn {
+            position: absolute; bottom: 35px; right: 35px;
+            width: 70px; height: 70px; background: rgba(255,255,255,0.25);
+            border: 2px solid rgba(255,255,255,0.5); border-radius: 50%;
+            color: white; font-weight: bold; font-size: 16px;
+            display: flex; justify-content: center; align-items: center; z-index: 20;
+        }
+        #jump-btn:active { background: rgba(56, 189, 248, 0.8); transform: scale(0.95); }
+
+        #touch-camera-zone {
+            position: absolute; top: 0; right: 0; width: 60vw; height: 100vh; z-index: 15;
+        }
+    </style>
+</head>
+<body>
+
+<div id="crosshair">+</div>
+<div id="ui">
+    <div style="font-size: 15px; font-weight: bold; margin-bottom: 4px;">🌐 3D 멀티플레이어</div>
+    <div>접속자: <span id="player-count">1</span>명</div>
+    <div id="room-status">상태: 서버 연결 중...</div>
+    
+    <div id="room-controls">
+        <button class="room-btn" onclick="createRoom()">🏠 방 만들기</button>
+        <button class="room-btn" onclick="joinRoom()">🔗 방 참가하기</button>
+    </div>
+</div>
+
+<div id="shiftlock-btn">🔒 Lock OFF</div>
+<div id="joystick-zone"><div id="joystick-knob"></div></div>
+<div id="jump-btn">점프</div>
+<div id="touch-camera-zone"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+
+<script>
+    let peer = null;
+    let myRoomId = "";
+    let myData = { id: "", x: (Math.random() - 0.5) * 6, y: 0, z: (Math.random() - 0.5) * 6, rotY: 0 };
+    let velocityY = 0, gravity = -0.015, jumpStrength = 0.32, isGrounded = true;
+    let cameraDistance = 6, isShiftLock = false;
+
+    const connections = {};
+    const otherPlayers = {};
+
+    // 1. Three.js 씬 초기화
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0f172a);
+
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    const light = new THREE.DirectionalLight(0xffffff, 1);
+    light.position.set(5, 10, 7);
+    scene.add(light);
+    scene.add(new THREE.AmbientLight(0x64748b));
+
+    const grid = new THREE.GridHelper(100, 50, 0x38bdf8, 0x334155);
+    scene.add(grid);
+
+    function createPlayerMesh(isMe) {
+        const group = new THREE.Group();
+        const body = new THREE.Mesh(new THREE.BoxGeometry(1, 1.8, 1), new THREE.MeshStandardMaterial({ color: isMe ? 0x38bdf8 : 0xef4444 }));
+        body.position.y = 0.9;
+        group.add(body);
+
+        const hat = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.3, 1.1), new THREE.MeshStandardMaterial({ color: isMe ? 0xf43f5e : 0x10b981 }));
+        hat.position.y = 1.95;
+        group.add(hat);
+
+        scene.add(group);
+        return group;
+    }
+
+    const myMesh = createPlayerMesh(true);
+
+    // 2. PeerJS 기반 방 접속 처리
+    function initPeer(customId = null) {
+        if (peer) peer.destroy();
+        
+        peer = customId ? new Peer(customId) : new Peer();
+
+        peer.on('open', (id) => {
+            myData.id = id;
+            document.getElementById("room-status").innerText = "준비 완료 (방 생성/참가 가능)";
+            document.getElementById("room-status").style.color = "#10b981";
+        });
+
+        peer.on('connection', (conn) => {
+            setupConnection(conn);
+        });
+
+        peer.on('error', (err) => {
+            alert("연결 오류: " + err.type);
+        });
+    }
+
+    initPeer();
+
+    function setupConnection(conn) {
+        conn.on('open', () => {
+            connections[conn.peer] = conn;
+            document.getElementById("room-status").innerText = "상대방 연결됨! 🟢";
+            document.getElementById("room-status").style.color = "#10b981";
+        });
+
+        conn.on('data', (data) => {
+            if (!otherPlayers[data.id]) {
+                otherPlayers[data.id] = createPlayerMesh(false);
+            }
+            const mesh = otherPlayers[data.id];
+            mesh.position.set(data.x, data.y, data.z);
+            mesh.rotation.y = data.rotY;
+
+            document.getElementById("player-count").innerText = Object.keys(otherPlayers).length + 1;
+        });
+
+        conn.on('close', () => {
+            if (otherPlayers[conn.peer]) {
+                scene.remove(otherPlayers[conn.peer]);
+                delete otherPlayers[conn.peer];
+            }
+            delete connections[conn.peer];
+            document.getElementById("player-count").innerText = Object.keys(otherPlayers).length + 1;
+            document.getElementById("room-status").innerText = "상대방 퇴장함";
+        });
+    }
+
+    // 3. 방 생성 & 참가
+    function createRoom() {
+        const randomCode = "ROOM" + Math.floor(1000 + Math.random() * 9000);
+        initPeer(randomCode);
+        document.getElementById("room-status").innerText = `방 생성됨! 코드: ${randomCode}`;
+        document.getElementById("room-status").style.color = "#38bdf8";
+        alert(`방 코드가 생성되었습니다:\n\n[ ${randomCode} ]\n\n다른 기기에서 [방 참가하기]를 누르고 위 코드를 입력하세요!`);
+    }
+
+    function joinRoom() {
+        const code = prompt("참가할 방 코드를 입력하세요 (예: ROOM1234):");
+        if (!code) return;
+        
+        document.getElementById("room-status").innerText = `${code} 방 접속 시도 중...`;
+        const conn = peer.connect(code.trim());
+        setupConnection(conn);
+    }
+
+    // 4. 조이스틱 & 터치 조작
+    document.getElementById("shiftlock-btn").addEventListener("click", () => {
+        isShiftLock = !isShiftLock;
+        const btn = document.getElementById("shiftlock-btn");
+        const crosshair = document.getElementById("crosshair");
+        btn.innerText = isShiftLock ? "🔒 Lock ON" : "🔒 Lock OFF";
+        btn.classList.toggle("active", isShiftLock);
+        crosshair.style.display = isShiftLock ? "block" : "none";
+    });
+
+    function doJump() {
+        if (isGrounded) { velocityY = jumpStrength; isGrounded = false; }
+    }
+    document.getElementById("jump-btn").addEventListener("touchstart", (e) => {
+        e.preventDefault(); e.stopPropagation(); doJump();
+    }, { passive: false });
+
+    let moveForward = 0, moveSide = 0, joystickTouchId = null, joyStartX = 0, joyStartY = 0;
+    const joystickZone = document.getElementById("joystick-zone");
+    const joystickKnob = document.getElementById("joystick-knob");
+
+    joystickZone.addEventListener("touchstart", (e) => {
+        e.preventDefault();
+        if (joystickTouchId !== null) return;
+        const touch = e.changedTouches[0];
+        joystickTouchId = touch.identifier;
+        joyStartX = touch.clientX; joyStartY = touch.clientY;
+    }, { passive: false });
+
+    window.addEventListener("touchmove", (e) => {
+        if (joystickTouchId === null) return;
+        let touch = Array.from(e.touches).find(t => t.identifier === joystickTouchId);
+        if (!touch) return;
+
+        let deltaX = touch.clientX - joyStartX, deltaY = touch.clientY - joyStartY;
+        let distance = Math.min(Math.hypot(deltaX, deltaY), 45);
+        let angle = Math.atan2(deltaY, deltaX);
+
+        joystickKnob.style.transform = `translate(${Math.cos(angle) * distance}px, ${Math.sin(angle) * distance}px)`;
+        moveForward = -Math.sin(angle) * (distance / 45);
+        moveSide = -Math.cos(angle) * (distance / 45);
+    }, { passive: false });
+
+    function handleTouchEnd(e) {
+        if (joystickTouchId === null) return;
+        let touch = Array.from(e.changedTouches).find(t => t.identifier === joystickTouchId);
+        if (touch) {
+            joystickTouchId = null;
+            joystickKnob.style.transform = `translate(0px, 0px)`;
+            moveForward = 0; moveSide = 0;
+        }
+    }
+    window.addEventListener("touchend", handleTouchEnd);
+    window.addEventListener("touchcancel", handleTouchEnd);
+
+    let camTouchActive = false, lastTouchX = 0;
+    document.getElementById("touch-camera-zone").addEventListener("touchstart", (e) => {
+        if (e.touches.length === 1) { camTouchActive = true; lastTouchX = e.touches[0].clientX; }
+    });
+
+    window.addEventListener("touchmove", (e) => {
+        if (camTouchActive && e.touches.length === 1) {
+            let deltaX = e.touches[0].clientX - lastTouchX;
+            myData.rotY -= deltaX * 0.008;
+            lastTouchX = e.touches[0].clientX;
+        }
+    });
+    window.addEventListener("touchend", () => camTouchActive = false);
+
+    // 5. 프레임 루프
+    let lastSend = 0;
+    function animate() {
+        requestAnimationFrame(animate);
+
+        const speed = 0.12;
+        if (Math.abs(moveForward) > 0.05 || Math.abs(moveSide) > 0.05) {
+            myData.z -= (Math.cos(myData.rotY) * moveForward - Math.sin(myData.rotY) * moveSide) * speed;
+            myData.x -= (Math.sin(myData.rotY) * moveForward + Math.cos(myData.rotY) * moveSide) * speed;
+        }
+
+        velocityY += gravity;
+        myData.y += velocityY;
+        if (myData.y <= 0) { myData.y = 0; velocityY = 0; isGrounded = true; }
+
+        myMesh.position.set(myData.x, myData.y, myData.z);
+        myMesh.rotation.y = myData.rotY;
+
+        camera.position.x = myData.x + Math.sin(myData.rotY) * cameraDistance;
+        camera.position.z = myData.z + Math.cos(myData.rotY) * cameraDistance;
+        camera.position.y = myData.y + 1.5 + (cameraDistance * 0.4);
+        camera.lookAt(myData.x, myData.y + 1.2, myData.z);
+
+        const now = Date.now();
+        if (now - lastSend > 33) {
+            Object.values(connections).forEach(conn => {
+                if (conn && conn.open) conn.send(myData);
+            });
+            lastSend = now;
+        }
+
+        renderer.render(scene, camera);
+    }
+    animate();
+
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+</script>
+</body>
+</html>
