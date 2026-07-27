@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>3D 타워 점프맵</title>
+  
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.2/peerjs.min.js"></script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+      user-select: none;
+      -webkit-user-select: none;
+      margin: 0;
+      padding: 0;
+    }
+    body, html {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #0b0e14;
+      font-family: 'Pretendard', -apple-system, sans-serif;
+      color: #ffffff;
+    }
+    #game-container {
+      width: 100%;
+      height: 100%;
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
+
+    /* UI 패널 공통 */
+    .ui-panel {
+      position: absolute;
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 12px;
+      padding: 10px 14px;
+      z-index: 10;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    }
+
+    /* 좌측 상단: 멀티플레이 정보 */
+    #info-panel {
+      top: 12px;
+      left: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      font-size: 12px;
+    }
+    .title-text {
+      font-weight: bold;
+      font-size: 14px;
+      color: #38bdf8;
+    }
+    .status-text {
+      font-weight: 600;
+      color: #4ade80;
+    }
+    .btn-group {
+      display: flex;
+      gap: 6px;
+      margin-top: 4px;
+    }
+    .ui-btn {
+      background: #0284c7;
+      color: #fff;
+      border: none;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    .ui-btn:active {
+      background: #0369a1;
+    }
+
+    /* 중앙 상단: Floor 선택기 */
+    #floor-panel {
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      border: 1px solid #22c55e;
+    }
+    .floor-controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .floor-btn {
+      background: rgba(255, 255, 255, 0.2);
+      border: none;
+      color: #fff;
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      font-size: 14px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .floor-btn:active {
+      background: #22c55e;
+    }
+    .floor-title {
+      font-size: 15px;
+      font-weight: bold;
+    }
+    .floor-sub {
+      font-size: 11px;
+      color: #22c55e;
+    }
+
+    /* 우측 상단: 카메라 버튼 */
+    #camera-panel {
+      top: 12px;
+      right: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    /* 하단 조이스틱 & 점프 버튼 */
+    #joystick-zone {
+      position: absolute;
+      bottom: 25px;
+      left: 25px;
+      width: 110px;
+      height: 110px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 2px solid rgba(255, 255, 255, 0.2);
+      border-radius: 50%;
+      z-index: 10;
+      touch-action: none;
+    }
+    #joystick-stick {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 45px;
+      height: 45px;
+      background: #38bdf8;
+      border-radius: 50%;
+      transform: translate(-50%, -50%);
+      box-shadow: 0 0 8px rgba(56, 189, 248, 0.5);
+    }
+    #jump-btn {
+      position: absolute;
+      bottom: 30px;
+      right: 25px;
+      width: 75px;
+      height: 75px;
+      background: rgba(255, 255, 255, 0.2);
+      border: 2px solid rgba(255, 255, 255, 0.4);
+      border-radius: 50%;
+      color: #fff;
+      font-size: 16px;
+      font-weight: bold;
+      z-index: 10;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      touch-action: none;
+    }
+    #jump-btn:active {
+      background: rgba(56, 189, 248, 0.6);
+    }
+  </style>
+</head>
+<body>
+
+  <div id="game-container"></div>
+
+  <div id="info-panel" class="ui-panel">
+    <div class="title-text">🎮 3D 타워 점프</div>
+    <div id="my-id">내 ID: 준비 중...</div>
+    <div id="peer-count">접속자: 1명</div>
+    <div id="status-label" class="status-text">게임 준비 완료 🟢</div>
+    <div class="btn-group">
+      <button class="ui-btn" onclick="createRoom()">🏠 방 생성</button>
+      <button class="ui-btn" onclick="joinRoom()">🔗 방 참가</button>
+    </div>
+  </div>
+
+  <div id="floor-panel" class="ui-panel">
+    <div class="floor-controls">
+      <button class="floor-btn" onclick="changeFloor(-1)">◀</button>
+      <span id="floor-display" class="floor-title">Floor 1</span>
+      <button class="floor-btn" onclick="changeFloor(1)">▶</button>
+    </div>
+    <span id="max-floor-display" class="floor-sub">Max: Floor 1</span>
+  </div>
+
+  <div id="camera-panel">
+    <button id="cam-mode-btn" class="ui-btn" onclick="toggleCameraMode()">🎥 3인칭</button>
+    <button id="lock-btn" class="ui-btn" onclick="toggleLock()">🔓 Lock OFF</button>
+  </div>
+
+  <div id="joystick-zone"><div id="joystick-stick"></div></div>
+  <div id="jump-btn">점프</div>
+
+  <script>
+    // --- 기본 변수 ---
+    let scene, camera, renderer;
+    let player, playerBody, playerHead;
+    let platforms = [];
+    let otherPlayers = {};
+    
+    // 물리 관련
+    let velocityY = 0;
+    const gravity = -0.012;
+    const jumpPower = 0.35;
+    let isGrounded = false;
+    let moveVector = { x: 0, z: 0 };
+    let moveSpeed = 0.18;
+
+    // 카메라 & 층
+    let currentFloor = 1;
+    let maxFloor = 1; // 도달한 최고 층수 (기본 1층)
+    let isThirdPerson = true;
+    let isLocked = false;
+    let cameraAngleY = 0;
+
+    // 멀티플레이어
+    let peer = null, conn = null;
+    let myPeerId = '';
+
+    // --- 1. Three.js 초기화 ---
+    function init() {
+      try {
+        const container = document.getElementById('game-container');
+
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0b0e14);
+        scene.fog = new THREE.FogExp2(0x0b0e14, 0.008);
+
+        camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        container.appendChild(renderer.domElement);
+
+        // 조명
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
+        dirLight.position.set(20, 50, 20);
+        dirLight.castShadow = true;
+        scene.add(dirLight);
+
+        // 캐릭터 생성
+        createLocalPlayer();
+
+        // 1~10층 발판 생성
+        buildTowerPlatforms();
+
+        // 조작 세팅
+        setupControls();
+
+        // 안전하게 PeerJS 실행
+        setupPeerSafe();
+
+        window.addEventListener('resize', onWindowResize);
+
+        // 1층 시작
+        teleportToFloor
