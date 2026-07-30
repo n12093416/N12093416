@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>3D 타워 점프맵/title>
+  
+  <!-- Three.js & PeerJS CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.2/peerjs.min.js"></script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+      user-select: none;
+      -webkit-user-select: none;
+      margin: 0;
+      padding: 0;
+    }
+    body, html {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #0b0e14;
+      font-family: 'Pretendard', -apple-system, sans-serif;
+      color: #ffffff;
+    }
+    #game-container {
+      width: 100%;
+      height: 100%;
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
+
+    /* UI 패널 */
+    .ui-panel {
+      position: absolute;
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 12px;
+      padding: 10px 14px;
+      z-index: 10;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    }
+
+    #info-panel {
+      top: 12px;
+      left: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      font-size: 12px;
+    }
+    .title-text {
+      font-weight: bold;
+      font-size: 14px;
+      color: #38bdf8;
+    }
+    .status-text {
+      font-weight: 600;
+      color: #4ade80;
+    }
+    .btn-group {
+      display: flex;
+      gap: 6px;
+      margin-top: 4px;
+    }
+    .ui-btn {
+      background: #0284c7;
+      color: #fff;
+      border: none;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    .ui-btn:active {
+      background: #0369a1;
+    }
+
+    #floor-panel {
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      border: 1px solid #22c55e;
+    }
+    .floor-controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .floor-btn {
+      background: rgba(255, 255, 255, 0.2);
+      border: none;
+      color: #fff;
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      font-size: 14px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .floor-btn:active {
+      background: #22c55e;
+    }
+    .floor-title {
+      font-size: 15px;
+      font-weight: bold;
+    }
+    .floor-sub {
+      font-size: 11px;
+      color: #22c55e;
+    }
+
+    #camera-panel {
+      top: 12px;
+      right: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      z-index: 10;
+    }
+
+    #joystick-zone {
+      position: absolute;
+      bottom: 25px;
+      left: 25px;
+      width: 110px;
+      height: 110px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 2px solid rgba(255, 255, 255, 0.2);
+      border-radius: 50%;
+      z-index: 10;
+      touch-action: none;
+    }
+    #joystick-stick {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 45px;
+      height: 45px;
+      background: #38bdf8;
+      border-radius: 50%;
+      transform: translate(-50%, -50%);
+      box-shadow: 0 0 8px rgba(56, 189, 248, 0.5);
+    }
+    #jump-btn {
+      position: absolute;
+      bottom: 30px;
+      right: 25px;
+      width: 75px;
+      height: 75px;
+      background: rgba(255, 255, 255, 0.2);
+      border: 2px solid rgba(255, 255, 255, 0.4);
+      border-radius: 50%;
+      color: #fff;
+      font-size: 16px;
+      font-weight: bold;
+      z-index: 10;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      touch-action: none;
+    }
+    #jump-btn:active {
+      background: rgba(56, 189, 248, 0.6);
+    }
+  </style>
+</head>
+<body>
+
+  <div id="game-container"></div>
+
+  <!-- UI 패널 -->
+  <div id="info-panel" class="ui-panel">
+    <div class="title-text">🎮 3D 타워 점프</div>
+    <div id="my-id">방 코드: 생성 필요</div>
+    <div id="peer-count">접속자: 1명</div>
+    <div id="status-label" class="status-text">싱글 플레이 🟢</div>
+    <div class="btn-group">
+      <button class="ui-btn" onclick="createRoom()">🏠 방 생성</button>
+      <button class="ui-btn" onclick="joinRoom()">🔗 방 참가</button>
+    </div>
+  </div>
+
+  <div id="floor-panel" class="ui-panel">
+    <div class="floor-controls">
+      <button class="floor-btn" onclick="changeFloor(-1)">◀</button>
+      <span id="floor-display" class="floor-title">Floor 1</span>
+      <button class="floor-btn" onclick="changeFloor(1)">▶</button>
+    </div>
+    <span id="max-floor-display" class="floor-sub">Max: Floor 1</span>
+  </div>
+
+  <div id="camera-panel">
+    <button id="cam-mode-btn" class="ui-btn" onclick="toggleCameraMode()">🎥 3인칭</button>
+  </div>
+
+  <!-- 조작부 -->
+  <div id="joystick-zone"><div id="joystick-stick"></div></div>
+  <div id="jump-btn">점프</div>
+
+  <script>
+    let scene, camera, renderer;
+    let player, playerBody, playerHead;
+    let platforms = [];
+    let otherPlayers = {};
+    
+    let velocityY = 0;
+    const gravity = -0.012;
+    const jumpPower = 0.36;
+    let isGrounded = false;
+    let moveVector = { x: 0, z: 0 };
+    let moveSpeed = 0.18;
+
+    let currentFloor = 1;
+    let maxFloor = 1;
+    const TOTAL_FLOORS = 50;
+
+    let isThirdPerson = true;
+    let cameraAngleY = 0;
+    let cameraAngleX = 0.3;
+
+    // 멀티플레이 변수
+    let peer = null, conn = null;
+    let myPeerId = '';
+
+    function init() {
+      try {
+        const container = document.getElementById('game-container');
+
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0b0e14);
+        scene.fog = new THREE.FogExp2(0x0b0e14, 0.008);
+
+        camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        container.appendChild(renderer.domElement);
+
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
+        dirLight.position.set(20, 50, 20);
+        dirLight.castShadow = true;
+        scene.add(dirLight);
+
+        createLocalPlayer();
+        buildTowerPlatforms();
+        setupControls();
+        initPeerDefault();
+
+        window.addEventListener('resize', onWindowResize);
+
+        teleportToFloor(1);
+        animate();
+      } catch (err) {
+        console.error("Init failed:", err);
+      }
+    }
+
+    function createLocalPlayer() {
+      player = new THREE.Group();
+
+      const bodyGeo = new THREE.BoxGeometry(1.2, 2.0, 1.2);
+      const bodyMat = new THREE.MeshStandardMaterial({ color: 0x3b82f6 });
+      playerBody = new THREE.Mesh(bodyGeo, bodyMat);
+      playerBody.position.y = 1.0;
+      playerBody.castShadow = true;
+      player.add(playerBody);
+
+      const headGeo = new THREE.BoxGeometry(1.25, 0.4, 1.25);
+      const headMat = new THREE.MeshStandardMaterial({ color: 0xf43f5e });
+      playerHead = new THREE.Mesh(headGeo, headMat);
+      playerHead.position.y = 2.1;
+      playerHead.castShadow = true;
+      player.add(playerHead);
+
+      scene.add(player);
+    }
+
+    function createPlatform(x, y, z, w, h, d, color = 0x38bdf8, floorIndex = 1) {
+      const geo = new THREE.BoxGeometry(w, h, d);
+      const mat = new THREE.MeshStandardMaterial({ color: color, roughness: 0.3 });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(x, y, z);
+      mesh.receiveShadow = true;
+      mesh.castShadow = true;
+      scene.add(mesh);
+
+      platforms.push({
+        mesh: mesh,
+        minX: x - w / 2,
+        maxX: x + w / 2,
+        minY: y - h / 2,
+        maxY: y + h / 2,
+        minZ: z - d / 2,
+        maxZ: z + d / 2,
+        floor: floorIndex
+      });
+    }
+
+    function buildTowerPlatforms() {
+      createPlatform(0, -1, 0, 80, 1, 80, 0x1e293b, 1);
+
+      for (let floor = 1; floor <= TOTAL_FLOORS; floor++) {
+        const baseY = (floor - 1) * 15;
+
+        createPlatform(0, baseY, 0, 10, 0.8, 10, 0x22c55e, floor);
+
+        createPlatform(0,   baseY + 2.5,  -9,  4.5, 0.8, 4.5, 0xeab308, floor);
+        createPlatform(6,   baseY + 5.0,  -15, 4.5, 0.8, 4.5, 0xf97316, floor);
+        createPlatform(12,  baseY + 7.5,  -9,  4.5, 0.8, 4.5, 0xef4444, floor);
+        createPlatform(6,   baseY + 10.0,  0,  4.5, 0.8, 4.5, 0xa855f7, floor);
+        createPlatform(0,   baseY + 12.5,  7,  4.5, 0.8, 4.5, 0x06b6d4, floor);
+      }
+    }
+
+    function changeFloor(delta) {
+      let nextFloor = currentFloor + delta;
+      if (nextFloor < 1) nextFloor = 1;
+      if (nextFloor > maxFloor) nextFloor = maxFloor;
+
+      currentFloor = nextFloor;
+      updateFloorUI();
+      teleportToFloor(currentFloor);
+    }
+
+    function teleportToFloor(floorNum) {
+      const targetY = (floorNum - 1) * 15 + 0.4;
+      player.position.set(0, targetY, 0);
+      velocityY = 0;
+      isGrounded = true;
+    }
+
+    function updateFloorUI() {
+      document.getElementById('floor-display').innerText = `Floor ${currentFloor}`;
+      document.getElementById('max-floor-display').innerText = `Max: Floor ${maxFloor}`;
+    }
+
+    function updatePhysics() {
+      const prevY = player.position.y;
+
+      velocityY += gravity;
+      player.position.y += velocityY;
+
+      const sin = Math.sin(cameraAngleY);
+      const cos = Math.cos(cameraAngleY);
+
+      const dirX = moveVector.x * cos + moveVector.z * sin;
+      const dirZ = -moveVector.x * sin + moveVector.z * cos;
+
+      player.position.x += dirX * moveSpeed;
+      player.position.z += dirZ * moveSpeed;
+
+      if (Math.abs(moveVector.x) > 0.1 || Math.abs(moveVector.z) > 0.1) {
+        player.rotation.y = Math.atan2(-dirX, -dirZ);
+      }
+
+      isGrounded = false;
+      const pX = player.position.x;
+      const pY = player.position.y;
+      const pZ = player.position.z;
+      const playerRadius = 0.6;
+
+      let landedPlatform = null;
+      let highestLandingY = -999;
+
+      for (let i = 0; i < platforms.length; i++) {
+        const p = platforms[i];
+
+        if (pX >= p.minX - playerRadius && pX <= p.maxX + playerRadius &&
+            pZ >= p.minZ - playerRadius && pZ <= p.maxZ + playerRadius) {
+
+          if (velocityY <= 0) {
+            const wasAbove = prevY >= p.maxY - 0.5;
+            const isNearTop = pY <= p.maxY + 0.6 && pY >= p.minY - 0.8;
+
+            if (wasAbove && isNearTop) {
+              if (p.maxY > highestLandingY) {
+                highestLandingY = p.maxY;
+                landedPlatform = p;
+              }
+            }
+          }
+        }
+      }
+
+      if (landedPlatform) {
+        player.position.y = landedPlatform.maxY;
+        velocityY = 0;
+        isGrounded = true;
+
+        if (landedPlatform.floor > maxFloor) maxFloor = landedPlatform.floor;
+        if (landedPlatform.floor > currentFloor) currentFloor = landedPlatform.floor;
+        updateFloorUI();
+      }
+
+      if (player.position.y < (currentFloor - 1) * 15 - 12) {
+        teleportToFloor(currentFloor);
+      }
+
+      updateCamera();
+      broadcastPosition();
+    }
+
+    function doJump() {
+      if (isGrounded) {
+        velocityY = jumpPower;
+        isGrounded = false;
+      }
+    }
+
+    function updateCamera() {
+      const dist = 9;
+      if (isThirdPerson) {
+        const pitch = Math.max(-0.4, Math.min(1.2, cameraAngleX));
+        const hDist = dist * Math.cos(pitch);
+        const vDist = dist * Math.sin(pitch);
+
+        camera.position.x = player.position.x + Math.sin(cameraAngleY) * hDist;
+        camera.position.z = player.position.z + Math.cos(cameraAngleY) * hDist;
+        camera.position.y = player.position.y + 1.2 + vDist;
+        camera.lookAt(player.position.x, player.position.y + 1.2, player.position.z);
+      } else {
+        camera.position.set(player.position.x, player.position.y + 1.8, player.position.z);
+        const pitch = Math.max(-1.2, Math.min(1.2, cameraAngleX));
+        const target = new THREE.Vector3(
+          player.position.x - Math.sin(cameraAngleY) * Math.cos(pitch) * 10,
+          player.position.y + 1.8 + Math.sin(pitch) * 10,
+          player.position.z - Math.cos(cameraAngleY) * Math.cos(pitch) * 10
+        );
+        camera.lookAt(target);
+      }
+    }
+
+    function setupControls() {
+      const zone = document.getElementById('joystick-zone');
+      const stick = document.getElementById('joystick-stick');
+      const jumpBtn = document.getElementById('jump-btn');
+
+      let touchId = null;
+      let center = { x: 0, y: 0 };
+
+      zone.addEventListener('touchstart', (e) => {
+        const touch = e.changedTouches[0];
+        touchId = touch.identifier;
+        const rect = zone.getBoundingClientRect();
+        center = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+        moveStick(touch);
+      }, { passive: false });
+
+      window.addEventListener('touchmove', (e) => {
+        for (let touch of e.changedTouches) {
+          if (touch.identifier === touchId) moveStick(touch);
+        }
+      }, { passive: false });
+
+      const endHandler = (e) => {
+        for (let touch of e.changedTouches) {
+          if (touch.identifier === touchId) {
+            touchId = null;
+            stick.style.transform = `translate(-50%, -50%)`;
+            moveVector = { x: 0, z: 0 };
+          }
+        }
+      };
+
+      window.addEventListener('touchend', endHandler);
+      window.addEventListener('touchcancel', endHandler);
+
+      function moveStick(touch) {
+        const dx = touch.clientX - center.x;
+        const dy = touch.clientY - center.y;
+        const dist = Math.min(Math.hypot(dx, dy), 40);
+        const angle = Math.atan2(dy, dx);
+
+        const mx = Math.cos(angle) * dist;
+        const my = Math.sin(angle) * dist;
+
+        stick.style.transform = `translate(calc(-50% + ${mx}px), calc(-50% + ${my}px))`;
+
+        moveVector.x = mx / 40;
+        moveVector.z = my / 40;
+      }
+
+      jumpBtn.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        doJump();
+      });
+      jumpBtn.addEventListener('click', doJump);
+
+      window.addEventListener('keydown', (e) => {
+        if (e.code === 'Space') doJump();
+        if (e.code === 'KeyW') moveVector.z = -1;
+        if (e.code === 'KeyS') moveVector.z = 1;
+        if (e.code === 'KeyA') moveVector.x = -1;
+        if (e.code === 'KeyD') moveVector.x = 1;
+      });
+      window.addEventListener('keyup', (e) => {
+        if (['KeyW','KeyS'].includes(e.code)) moveVector.z = 0;
+        if (['KeyA','KeyD'].includes(e.code)) moveVector.x = 0;
+      });
+
+      // 화면 회전
+      let isMouseDown = false, prevMouseX = 0, prevMouseY = 0;
+
+      window.addEventListener('mousedown', (e) => {
+        if (e.target.closest('.ui-panel, #joystick-zone, #jump-btn')) return;
+        isMouseDown = true;
+        prevMouseX = e.clientX;
+        prevMouseY = e.clientY;
+      });
+
+      window.addEventListener('mousemove', (e) => {
+        if (!isMouseDown) return;
+        cameraAngleY += (e.clientX - prevMouseX) * 0.005;
+        cameraAngleX += (e.clientY - prevMouseY) * 0.005;
+        prevMouseX = e.clientX;
+        prevMouseY = e.clientY;
+      });
+
+      window.addEventListener('mouseup', () => { isMouseDown = false; });
+
+      let camTouchId = null, prevTouchX = 0, prevTouchY = 0;
+
+      window.addEventListener('touchstart', (e) => {
+        for (let touch of e.changedTouches) {
+          if (touch.target.closest('.ui-panel, #joystick-zone, #jump-btn')) continue;
+          if (camTouchId === null) {
+            camTouchId = touch.identifier;
+            prevTouchX = touch.clientX;
+            prevTouchY = touch.clientY;
+          }
+        }
+      }, { passive: false });
+
+      window.addEventListener('touchmove', (e) => {
+        for (let touch of e.changedTouches) {
+          if (touch.identifier === camTouchId) {
+            cameraAngleY += (touch.clientX - prevTouchX) * 0.005;
+            cameraAngleX += (touch.clientY - prevTouchY) * 0.005;
+            prevTouchX = touch.clientX;
+            prevTouchY = touch.clientY;
+          }
+        }
+      }, { passive: false });
+
+      const endCamTouch = (e) => {
+        for (let touch of e.changedTouches) {
+          if (touch.identifier === camTouchId) camTouchId = null;
+        }
+      };
+
+      window.addEventListener('touchend', endCamTouch);
+      window.addEventListener('touchcancel', endCamTouch);
+    }
+
+    function toggleCameraMode() {
+      isThirdPerson = !isThirdPerson;
+      document.getElementById('cam-mode-btn').innerText = isThirdPerson ? '🎥 3인칭' : '👁️ 1인칭';
+      playerBody.visible = isThirdPerson;
+      playerHead.visible = isThirdPerson;
+    }
+
+    // ==========================================
+    // ★ 단순화된 멀티플레이 (PeerJS) 로직
+    // ==========================================
+    function initPeerDefault() {
+      try {
+        if (typeof Peer === 'undefined') return;
+        peer = new Peer();
+      } catch (e) {
+        console.warn("PeerJS 준비 오류:", e);
+      }
+    }
+
+    // 1. 방 생성 (쉬운 4자리 숫자 방 코드 자동생성)
+    function createRoom() {
+      const roomCode = String(Math.floor(1000 + Math.random() * 9000));
+      
+      if (peer) peer.destroy(); // 기존 peer 연결 정리 후 새로 생성
+
+      peer = new Peer(roomCode);
+
+      peer.on('open', (id) => {
+        myPeerId = id;
+        document.getElementById('my-id').innerText = `방 코드: ${id}`;
+        alert(`방 생성이 완료되었습니다!\n방 코드: [ ${id} ]\n친구에게 4자리 코드를 알려주세요.`);
+      });
+
+      peer.on('connection', (c) => {
+        conn = c;
+        setupConnection();
+      });
+
+      peer.on('error', () => {
+        // 코드 중복 시 다시 생성
+        createRoom();
+      });
+    }
+
+    // 2. 방 참가 (4자리 방 코드 입력)
+    function joinRoom() {
+      const targetCode = prompt('참가할 4자리 방 코드를 입력하세요:');
+      if (targetCode && peer) {
+        conn = peer.connect(targetCode.trim());
+        setupConnection();
+      }
+    }
+
+    // 3. 연결 이벤트 처리
+    function setupConnection() {
+      if (!conn) return;
+
+      conn.on('open', () => {
+        document.getElementById('status-label').innerText = '멀티플레이 🟢';
+        document.getElementById('peer-count').innerText = '접속자: 2명';
+      });
+
+      conn.on('data', (data) => {
+        if (data.type === 'pose') updateRemotePlayer(data);
+      });
+    }
+
+    // 4. 캐릭터 위치 전송
+    function broadcastPosition() {
+      if (conn && conn.open) {
+        conn.send({
+          type: 'pose',
+          id: myPeerId,
+          x: player.position.x,
+          y: player.position.y,
+          z: player.position.z,
+          rotY: player.rotation.y
+        });
+      }
+    }
+
+    // 5. 상대방 캐릭터 렌더링
+    function updateRemotePlayer(data) {
+      if (!otherPlayers[data.id]) {
+        const group = new THREE.Group();
+        const b = new THREE.Mesh(new THREE.BoxGeometry(1.2, 2.0, 1.2), new THREE.MeshStandardMaterial({ color: 0x10b981 }));
+        b.position.y = 1.0;
+        const h = new THREE.Mesh(new THREE.BoxGeometry(1.25, 0.4, 1.25), new THREE.MeshStandardMaterial({ color: 0xf43f5e }));
+        h.position.y = 2.1;
+        group.add(b, h);
+        scene.add(group);
+        otherPlayers[data.id] = group;
+      }
+      const other = otherPlayers[data.id];
+      other.position.set(data.x, data.y, data.z);
+      other.rotation.y = data.rotY;
+    }
+
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+      updatePhysics();
+      renderer.render(scene, camera);
+    }
+
+    window.onload = init;
+  </script>
+</body>
+</html>
